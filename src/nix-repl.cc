@@ -18,12 +18,9 @@
 using namespace std;
 using namespace nix;
 
-
 string programId = "nix-repl";
 
-
-struct NixRepl
-{
+struct NixRepl {
     string curDir;
     EvalState state;
 
@@ -57,15 +54,13 @@ struct NixRepl
 };
 
 
-void printHelp()
-{
+void printHelp() {
     std::cout << "Usage: nix-repl [--help|--version]";
     std::cout << std::endl;
 }
 
 
-string removeWhitespace(string s)
-{
+string removeWhitespace(string s) {
     s = chomp(s);
     size_t n = s.find_first_not_of(" \n\r\t");
     if (n != string::npos) s = string(s, n);
@@ -75,16 +70,14 @@ string removeWhitespace(string s)
 
 NixRepl::NixRepl(const Strings & searchPath)
     : state(searchPath)
-    , staticEnv(false, &state.staticBaseEnv)
-{
+    , staticEnv(false, &state.staticBaseEnv) {
     curDir = absPath(".");
 
     store = openStore();
 }
 
 
-void NixRepl::mainLoop(const Strings & files)
-{
+void NixRepl::mainLoop(const Strings & files) {
     std::cout << "Welcome to Nix version " << NIX_VERSION << ". Type :? for help." << std::endl << std::endl;
 
     for (auto & i : files)
@@ -121,8 +114,7 @@ void NixRepl::mainLoop(const Strings & files)
 static sigjmp_buf sigintJmpBuf;
 
 
-static void sigintHandler(int signo)
-{
+static void sigintHandler(int signo) {
     siglongjmp(sigintJmpBuf, 1);
 }
 
@@ -130,8 +122,7 @@ static void sigintHandler(int signo)
 /* Oh, if only g++ had nested functions... */
 NixRepl * curRepl;
 
-char * completerThunk(const char * s, int state)
-{
+char * completerThunk(const char * s, int state) {
     string prefix(s);
 
     /* If the prefix has a slash in it, use readline's builtin filename
@@ -149,8 +140,7 @@ char * completerThunk(const char * s, int state)
 }
 
 
-bool NixRepl::getLine(string & line)
-{
+bool NixRepl::getLine(string & line) {
     struct sigaction act, old;
     act.sa_handler = sigintHandler;
     sigfillset(&act.sa_mask);
@@ -183,8 +173,7 @@ bool NixRepl::getLine(string & line)
 }
 
 
-void NixRepl::completePrefix(string prefix)
-{
+void NixRepl::completePrefix(string prefix) {
     completions.clear();
 
     size_t dot = prefix.rfind('.');
@@ -227,8 +216,7 @@ void NixRepl::completePrefix(string prefix)
 }
 
 
-static int runProgram(const string & program, const Strings & args)
-{
+static int runProgram(const string & program, const Strings & args) {
     std::vector<const char *> cargs; /* careful with c_str()! */
     cargs.push_back(program.c_str());
     for (Strings::const_iterator i = args.begin(); i != args.end(); ++i)
@@ -248,8 +236,7 @@ static int runProgram(const string & program, const Strings & args)
 }
 
 
-bool isVarName(const string & s)
-{
+bool isVarName(const string & s) {
     // FIXME: not quite correct.
     for (auto & i : s)
         if (!((i >= 'a' && i <= 'z') ||
@@ -261,8 +248,7 @@ bool isVarName(const string & s)
 }
 
 
-bool NixRepl::processLine(string line)
-{
+bool NixRepl::processLine(string line) {
     if (line == "") return true;
 
     string command, arg;
@@ -373,8 +359,7 @@ bool NixRepl::processLine(string line)
 }
 
 
-void NixRepl::loadFile(const Path & path)
-{
+void NixRepl::loadFile(const Path & path) {
     loadedFiles.remove(path);
     loadedFiles.push_back(path);
     Value v, v2;
@@ -385,8 +370,7 @@ void NixRepl::loadFile(const Path & path)
 }
 
 
-void NixRepl::initEnv()
-{
+void NixRepl::initEnv() {
     env = &state.allocEnv(envSize);
     env->up = &state.baseEnv;
     displ = 0;
@@ -398,8 +382,7 @@ void NixRepl::initEnv()
 }
 
 
-void NixRepl::reloadFiles()
-{
+void NixRepl::reloadFiles() {
     initEnv();
 
     Strings old = loadedFiles;
@@ -415,8 +398,7 @@ void NixRepl::reloadFiles()
 }
 
 
-void NixRepl::addAttrsToScope(Value & attrs)
-{
+void NixRepl::addAttrsToScope(Value & attrs) {
     state.forceAttrs(attrs);
     for (auto & i : *attrs.attrs)
         addVarToScope(i.name, *i.value);
@@ -424,8 +406,7 @@ void NixRepl::addAttrsToScope(Value & attrs)
 }
 
 
-void NixRepl::addVarToScope(const Symbol & name, Value & v)
-{
+void NixRepl::addVarToScope(const Symbol & name, Value & v) {
     if (displ >= envSize)
         throw Error("environment full; cannot add more variables");
     staticEnv.vars[name] = displ;
@@ -434,31 +415,27 @@ void NixRepl::addVarToScope(const Symbol & name, Value & v)
 }
 
 
-Expr * NixRepl::parseString(string s)
-{
+Expr * NixRepl::parseString(string s) {
     Expr * e = state.parseExprFromString(s, curDir, staticEnv);
     return e;
 }
 
 
-void NixRepl::evalString(string s, Value & v)
-{
+void NixRepl::evalString(string s, Value & v) {
     Expr * e = parseString(s);
     e->eval(state, *env, v);
     state.forceValue(v);
 }
 
 
-std::ostream & NixRepl::printValue(std::ostream & str, Value & v, unsigned int maxDepth)
-{
+std::ostream & NixRepl::printValue(std::ostream & str, Value & v, unsigned int maxDepth) {
     ValuesSeen seen;
     return printValue(str, v, maxDepth, seen);
 }
 
 
 // FIXME: lot of cut&paste from Nix's eval.cc.
-std::ostream & NixRepl::printValue(std::ostream & str, Value & v, unsigned int maxDepth, ValuesSeen & seen)
-{
+std::ostream & NixRepl::printValue(std::ostream & str, Value & v, unsigned int maxDepth, ValuesSeen & seen) {
     str.flush();
     checkInterrupt();
 
@@ -595,8 +572,7 @@ std::ostream & NixRepl::printValue(std::ostream & str, Value & v, unsigned int m
 }
 
 
-int main(int argc, char * * argv)
-{
+int main(int argc, char * * argv) {
     return handleExceptions(argv[0], [&]() {
         initNix();
         initGC();
