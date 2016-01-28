@@ -20,9 +20,16 @@ using namespace nix;
 
 string programId = "nix-repl";
 
+
+struct NixReplConfig {
+    Path configFile;
+};
+
 struct NixRepl {
     string curDir;
     EvalState state;
+
+    NixReplConfig config;
 
     Strings loadedFiles;
 
@@ -36,7 +43,8 @@ struct NixRepl {
     StringSet::iterator curCompletion;
 
     NixRepl(const Strings & searchPath);
-    void mainLoop(const Strings & files);
+    void initialize(const Strings & files);
+    void mainLoop();
     void completePrefix(string prefix);
     bool getLine(string & line);
     bool processLine(string line);
@@ -77,18 +85,21 @@ NixRepl::NixRepl(const Strings & searchPath)
 }
 
 
-void NixRepl::mainLoop(const Strings & files) {
-    std::cout << "Welcome to Nix version " << NIX_VERSION << ". Type :? for help." << std::endl << std::endl;
+void NixRepl::initialize(const Strings & files) {
+    std::cout << "Welcome to Nix version " << NIX_VERSION << "." << std::endl
+              << "Type :? for help." << std::endl;
 
-    for (auto & i : files)
-        loadedFiles.push_back(i);
+    for(auto & i : files) { loadedFiles.push_back(i); }
 
     reloadFiles();
-    if (!loadedFiles.empty()) std::cout << std::endl;
+    if(!loadedFiles.empty()) { std::cout << std::endl; }
 
     using_history();
     read_history(0);
+}
 
+
+void NixRepl::mainLoop() {
     while (true) {
         string line;
         if (!getLine(line)) {
@@ -597,6 +608,7 @@ int main(int argc, char * * argv) {
         });
 
         NixRepl repl(searchPath);
-        repl.mainLoop(files);
+        repl.initialize(files);
+        repl.mainLoop();
     });
 }
