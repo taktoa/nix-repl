@@ -1,7 +1,12 @@
 #include <iostream>
+#include <fstream>
 #include <cstdlib>
 
 #include <setjmp.h>
+
+#include <sys/types.h>
+#include <pwd.h>
+#include <unistd.h>
 
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -20,16 +25,11 @@ using namespace nix;
 
 string programId = "nix-repl";
 
-
-struct NixReplConfig {
-    Path configFile;
-};
-
 struct NixRepl {
     string curDir;
     EvalState state;
 
-    NixReplConfig config;
+    map<string, string> config;
 
     Strings loadedFiles;
 
@@ -44,6 +44,7 @@ struct NixRepl {
 
     NixRepl(const Strings & searchPath);
     void initialize(const Strings & files);
+    void processLineWithoutErrors(string & line);
     void mainLoop();
     void completePrefix(string prefix);
     bool getLine(string & line);
@@ -86,10 +87,26 @@ NixRepl::NixRepl(const Strings & searchPath)
 
 
 void NixRepl::initialize(const Strings & files) {
-    std::cout << "Welcome to Nix version " << NIX_VERSION << "." << std::endl
+    std::cout << "Welcome to Nix version " << "NIX_VERSION" << "." << std::endl
               << "Type :? for help." << std::endl;
 
-    for(auto & i : files) { loadedFiles.push_back(i); }
+    for(auto& i : files) { loadedFiles.push_back(i); }
+
+    struct passwd pwstruct;
+    char pwbuf[512];
+    struct passwd* pw;
+    getpwuid_r(getuid(), &pwstruct, pwbuf, 512, &pw);
+    std::string homeDir = pw->pw_dir;
+    std::string configPath = homeDir + "/.nix-repl";
+
+    if(access(configPath.c_str(), F_OK) != -1) {
+        std::ifstream configFile;
+        std::string configLine;
+        configFile.open(configPath, std::ifstream::in);
+        while(std::getline(configFile, configLine)) {
+            processLineWithoutErrors(configLine);
+        }
+    }
 
     reloadFiles();
     if(!loadedFiles.empty()) { std::cout << std::endl; }
@@ -98,6 +115,15 @@ void NixRepl::initialize(const Strings & files) {
     read_history(0);
 }
 
+void NixRepl::processLineWithoutErrors(string & line) {
+    try {
+        if(!processLine(removeWhitespace(line))) { return; }
+    } catch(Error & e) {
+        printMsg(lvlError, "error: " + e.msg());
+    } catch(Interrupted & e) {
+        printMsg(lvlError, "error: " + e.msg());
+    }
+}
 
 void NixRepl::mainLoop() {
     while (true) {
@@ -107,13 +133,7 @@ void NixRepl::mainLoop() {
             break;
         }
 
-        try {
-            if (!processLine(removeWhitespace(line))) return;
-        } catch (Error & e) {
-            printMsg(lvlError, "error: " + e.msg());
-        } catch (Interrupted & e) {
-            printMsg(lvlError, "error: " + e.msg());
-        }
+        processLineWithoutErrors(line);
 
         std::cout << std::endl;
     }
@@ -278,6 +298,7 @@ bool NixRepl::processLine(string line) {
              << "  <expr>        Evaluate and print expression\n"
              << "  <x> = <expr>  Bind expression to variable\n"
              << "  :a <expr>     Add attributes from resulting set to scope\n"
+             << "  :c <k> = <v>  Set config option <k> to value <v>\n"
              << "  :b <expr>     Build derivation\n"
              << "  :l <path>     Load Nix expression and add it to scope\n"
              << "  :p <expr>     Evaluate and print expression recursively\n"
@@ -291,6 +312,25 @@ bool NixRepl::processLine(string line) {
         Value v;
         evalString(arg, v);
         addAttrsToScope(v);
+    }
+
+    else if (command == ":c" || command == ":config") {
+        if(line == ":c") {
+            map<string, string>* cfg = &this->config;
+            for(auto it = cfg->begin(); it != cfg->end(); ++it) {
+                cout << it->first << " = " << it->second << endl;
+            }
+        } else {
+            try {
+                size_t ks = line.find(' ');
+                size_t vs = line.find('=');
+                size_t end = line.size() - 1;
+                string key = removeWhitespace(string(line, ks, vs - 2));
+                string val = removeWhitespace(string(line, vs + 1, end));
+                cout << "setting " << key << " to " << val << endl;
+                this->config[key] = val;
+            } catch(...) {}
+        }
     }
 
     else if (command == ":l" || command == ":load") {
@@ -314,7 +354,8 @@ bool NixRepl::processLine(string line) {
         evalString(arg, v);
         DrvInfo drvInfo(state);
         if (!getDerivation(state, v, drvInfo, false))
-            throw Error("expression does not evaluation to a derivation, so I can't build it");
+            throw Error("expression does not evaluation to a derivation, "
+                        "so I can't build it");
         Path drvPath = drvInfo.queryDrvPath();
         if (drvPath == "" || !store->isValidPath(drvPath))
             throw Error("expression did not evaluate to a valid derivation");
@@ -325,7 +366,9 @@ bool NixRepl::processLine(string line) {
                problems / SIGINT. */
             if (runProgram("nix-store", Strings{"-r", drvPath}) == 0) {
                 Derivation drv = readDerivation(drvPath);
-                std::cout << std::endl << "this derivation produced the following outputs:" << std::endl;
+                std::cout << std::endl
+                          << "this derivation produced the following outputs:"
+                          << std::endl;
                 for (auto & i : drv.outputs)
                     std::cout << format("  %1% -> %2%") % i.first % i.second.path << std::endl;
             }
